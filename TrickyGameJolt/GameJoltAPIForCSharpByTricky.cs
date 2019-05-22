@@ -18,7 +18,7 @@
 // 3. This notice may not be removed or altered from any source distribution.
 // EndLic
 
-ï»¿#define GAMEJOLT_DEBUG_MODE
+#define GAMEJOLT_DEBUG_MODE
 
 using System;
 using System.Net;
