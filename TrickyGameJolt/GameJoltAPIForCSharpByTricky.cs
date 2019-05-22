@@ -56,7 +56,7 @@ namespace TrickyGameJolt {
             */
             using (var client = new HttpClient(new HttpClientHandler { AutomaticDecompression = DecompressionMethods.GZip | DecompressionMethods.Deflate })) {
                 client.BaseAddress = new Uri(url);
-                HttpResponseMessage response = client.GetAsync("answers?order=desc&sort=activity&site=stackoverflow").Result;
+                HttpResponseMessage response = client.GetAsync(url).Result;
                 response.EnsureSuccessStatusCode();
                 string result = response.Content.ReadAsStringAsync().Result;
                 //Console.WriteLine("Result: " + result);
@@ -89,7 +89,7 @@ namespace TrickyGameJolt {
         }
 
         internal static void myerr(string err) {
-            var e = $"GAMEJOLT ERROR {err}";
+            var e = $"GAMEJOLT ERROR: {err}";
             if (crash)
                 throw new Exception(e);
             else {
@@ -102,6 +102,7 @@ namespace TrickyGameJolt {
         internal static Dictionary<string, string> gjrequest(string action, string querystring, string privatekey) {
             var url = $"https://api.gamejolt.com/api/game/v1/{action}/?{querystring}";
             url += "&signature=" + md5(url + privatekey);
+            chat($"Request sent: {url}");
             var ng = GET(url);
 
             chat("GJ returned:\n" + ng + "\nEND RETURN");
