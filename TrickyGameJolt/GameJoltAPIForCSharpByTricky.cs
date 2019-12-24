@@ -1,7 +1,7 @@
 // Lic:
 // TrickyGameJolt/GameJoltAPIForCSharpByTricky.cs
 // Simplistic Game Jolt API for C#
-// version: 19.05.22
+// version: 19.12.24
 // Copyright (C)  Jeroen P. Broks
 // This software is provided 'as-is', without any express or implied
 // warranty.  In no event will the authors be held liable for any damages
@@ -20,6 +20,8 @@
 
 #define GAMEJOLT_DEBUG_MODE
 
+#define GAMEJOLT_DEBUG_TROPHYFETCH
+
 using System;
 using System.Net;
 using System.IO;
@@ -33,6 +35,9 @@ using System.Diagnostics;
 
 namespace TrickyGameJolt {
 
+    public delegate void GJERROR(string message);
+
+
     /// <summary>
     /// Core features. 
     /// </summary>
@@ -41,6 +46,8 @@ namespace TrickyGameJolt {
         /// Set to false if you don't want your program to crash when something happens!
         /// </summary>
         static bool crash = true;
+        static public GJERROR ERRORFUNCTION = null;
+        static public GJERROR MSG = delegate(string message) { Debug.WriteLine(message); };
 
         static internal string GET(string url) {
             /*
@@ -90,6 +97,7 @@ namespace TrickyGameJolt {
 
         internal static void myerr(string err) {
             var e = $"GAMEJOLT ERROR: {err}";
+            ERRORFUNCTION?.Invoke(err);
             if (crash)
                 throw new Exception(e);
             else {
@@ -100,44 +108,141 @@ namespace TrickyGameJolt {
 
 
         internal static Dictionary<string, string> gjrequest(string action, string querystring, string privatekey) {
-            var url = $"https://api.gamejolt.com/api/game/v1/{action}/?{querystring}";
-            url += "&signature=" + md5(url + privatekey);
-            chat($"Request sent: {url}");
-            var ng = GET(url);
+            try {
+                var url = $"https://api.gamejolt.com/api/game/v1/{action}/?{querystring}";
+                url += "&signature=" + md5(url + privatekey);
+                chat($"Request sent: {url}");
+                var ng = GET(url).Trim();
 
-            chat("GJ returned:\n" + ng + "\nEND RETURN");
+                chat("GJ returned:\n" + ng + "\nEND RETURN");
 
-            var lines = ng.Split('\n');
-            var ret = new Dictionary<string, string>();
-            for (int li = 0; li < lines.Length; li++) {
-                var ln = lines[li].Trim();
-                if (ln != "") {
-                    var vr = ln.Split(':');
-                    if (vr.Length != 2) {
-                        myerr($"Game Jolt Parse error in line {li}");
-                    } else {
-                        var value = vr[1].Replace("\"", "").Trim();
-                        var key = vr[0];
-                        var kid = 0;
-                        while (ret.ContainsKey(key)) {
-                            kid++;
-                            key = $"{vr[0]}{kid}";
+                var lines = ng.Split('\n');
+                var ret = new Dictionary<string, string>();
+                //ret["success"] = "NOT YET CHECKED";
+                for (int li = 0; li < lines.Length; li++) {
+                    var ln = lines[li].Trim();
+                    Debug.WriteLine($"{li}\t{lines[li]}");
+                    if (ln != "") {
+                        var vr = ln.Split(':');
+                        if (vr.Length != 2) {
+                            myerr($"Game Jolt Parse error in line {li}");
+                        } else {
+                            var value = vr[1].Replace("\"", "").Trim();
+                            var key = vr[0];
+                            var kid = 0;
+                            while (ret.ContainsKey(key)) {
+                                kid++;
+                                key = $"{vr[0]}{kid}";
+                            }
+                            ret[key] = value;
                         }
-                        ret[key] = value;
                     }
                 }
-            }
-#if  GAMEJOLT_DEBUG_MODE
-            foreach (string k in ret.Keys) { //k,v := range ret {
-                var v = ret[k];
-                chat($"\t{k} = '{v}'");
-            }
+#if GAMEJOLT_DEBUG_MODE
+                foreach (string k in ret.Keys) { //k,v := range ret {
+                    var v = ret[k];
+                    chat($"\t{k} = '{v}'");
+                }
 #endif
-            if (ret["success"] != "true") { chat("Dit ging niet goed"); myerr(ret["message"]); }
-            return ret;
+                if ((!ret.ContainsKey("success")) || ret["success"] != "true") {
+                    chat("Dit ging niet goed");
+                    if (!ret.ContainsKey("message"))
+                        myerr($"No message known\n{ng}\n{ret["success"]}\nLines:{lines.Length}");
+                    else
+                        myerr(ret["message"]);
+                }
+                return ret;
+            } catch (Exception E) {
+                Debug.WriteLine("ERROR!");
+                Debug.WriteLine(E.Message);
+                Debug.WriteLine(E.StackTrace);
+                return null;
+            }
         }
     }
 
+
+
+    public class GJTrophy {
+        GJUser Parent;
+        int ID;
+        public string Name { get; private set; }
+        public string Description { get; private set; }
+        public string Image_Url { get; private set; } // Please note, this API can NOT load the image itself, as there is no telling which engine you use for this class. So you'll have to write a loader for the image yourself.
+        public string TrophyClass { get; private set; } // Bronze, Silver, Gold, Platinum
+        public string AchievedDate { get; private set; }
+        public bool Achieved => AchievedDate!="false";
+
+        public void Award() => Parent.AwardTrophy($"{ID}");
+
+        private GJTrophy(GJUser user) { Parent = user; }
+
+        static void chat(string msg) => GJAPI.chat(msg);
+
+        /// <summary>
+        /// Fetches all trophies for the game this user has been attached to. Please note that the index numbers are in fact the trophy ID numbers as they are stored on the Game Jolt server!
+        /// </summary>
+        /// <param name="user"></param>
+        /// <returns></returns>
+        static public Dictionary<int,GJTrophy> FetchAll(GJUser user) {
+            GJAPI.chat($"Fetching Trophies for {user.gameid}");
+            var ret = new Dictionary<int, GJTrophy>();
+            var querystring = $"game_id={user.gameid}&username={user.userid}&user_token={user.token}"; //, user.gamekey);
+            var url = $"https://api.gamejolt.com/api/game/v1/trophies/?{querystring}";
+            url += "&signature=" + GJAPI.md5(url + user.gamekey);
+            GJAPI.chat($"Request sent: {url}");
+            var ng = GJAPI.GET(url).Trim().Split('\n');
+            GJTrophy trophy=null;
+            foreach(string ngline in ng) {
+                var nglinec = ngline.Trim();
+                var p = nglinec.IndexOf(':');
+                var fld = nglinec.Substring(0, p).ToLower();
+                var val = nglinec.Substring(p+1);
+                if (val[0] == '"') val = val.Substring(1);
+                if (val[val.Length - 1] == '"') val=val.Substring(0, val.Length - 1);
+                chat($"{fld}:\t'{val}'");
+                switch (fld) {
+                    case "success":
+                        if (val != "true") { chat("No Success!"); return null; }
+                        break;
+                    case "id":
+                        try {
+                            var i = Int32.Parse(val);
+                            trophy = new GJTrophy(user);
+                            ret[i] = trophy;
+                            trophy.ID = i;
+                        } catch {
+                            Console.WriteLine($"Parsing index number ({val}) failed! Is something wrong with the server here?");
+                        }
+                        break;
+                    case "title":
+                        if (trophy == null) { Console.WriteLine($"Trying to attach a {fld} to a non-existent trophy!"); return null; }
+                        trophy.Name = val;
+                        break;
+                    case "difficulty":
+                        if (trophy == null) { Console.WriteLine($"Trying to attach a {fld} to a non-existent trophy!"); return null; }
+                        trophy.TrophyClass = val;
+                        break;
+                    case "description":
+                        if (trophy == null) { Console.WriteLine($"Trying to attach a {fld} to a non-existent trophy!"); return null; }
+                        trophy.Description = val;
+                        break;
+                    case "image_url":
+                        if (trophy == null) { Console.WriteLine($"Trying to attach a {fld} to a non-existent trophy!"); return null; }
+                        trophy.Image_Url = val;
+                        break;
+                    case "achieved":
+                        if (trophy == null) { Console.WriteLine($"Trying to attach a {fld} to a non-existent trophy!"); return null; }
+                        trophy.AchievedDate = val;
+                        break;
+
+                    default: throw new Exception($"Unknown field {fld}({val})"); // debug! In normal use this line should be on comment
+                }
+            }
+            return ret;
+        }
+
+    }
 
 
 
@@ -168,14 +273,25 @@ namespace TrickyGameJolt {
         /// <param name="ausername">User name</param>
         /// <param name="atoken">Token</param>
         public GJUser(string agameid, string aprivatekey, string ausername, string atoken) {
-            userid = ausername;
-            token = atoken;
-            gameid = agameid;
-            gamekey = aprivatekey; //getMD5Hash(privatekey)
-            idstring = $"&username={ausername}&user_token={atoken}";
-            gamestuff = $"&game_id={gameid}"; //+"&signature="+ret.gamesig
-            var d = qreq("users/auth", "");
-            LoggedIn = d["success"] == "true";
+            try {
+                userid = ausername;
+                token = atoken;
+                gameid = agameid;
+                gamekey = aprivatekey; //getMD5Hash(privatekey)
+                idstring = $"&username={ausername}&user_token={atoken}";
+                gamestuff = $"&game_id={gameid}"; //+"&signature="+ret.gamesig
+                var d = qreq("users/auth", "");
+                if (!d.ContainsKey("success")) {
+                    foreach(string k in d.Keys) {
+                        Debug.WriteLine($"{k} = {d[k]}");
+                        Console.WriteLine($"{k} = {d[k]}");
+                    }
+                }
+                LoggedIn = d["success"] == "true";
+            } catch (Exception error) {
+                Debug.WriteLine($"Logging in failed: {error.Message}");
+                LoggedIn = false;
+            }
         }
 
         /// <summary>
@@ -253,9 +369,10 @@ namespace TrickyGameJolt {
 
         public bool AwardTrophy(string id) {
             var r = qreq("trophies/add-achieved", "trophy_id=" + id);
+            foreach (string k in r.Keys)
+                GJAPI.MSG?.Invoke($"GJ:{k} = {r[k]}");
             return r["success"] == "true"; // temp line
         }
 
     }
 }
-
