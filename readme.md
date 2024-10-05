@@ -1,3 +1,8 @@
+# Leaving note!
+
+I am closing my books as far as Game Jolt is concerned!
+If you want to fork this repository in order to keep it maintained, be my guest, but I am not going to look into this anymore!
+
 # Simplistic Game Jolt API for C#
 
 This is a very extremely simplistic Game Jolt API written in C#.
